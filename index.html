@@ -23,9 +23,11 @@ body{font-family:'Segoe UI',sans-serif;background:#f5f7fc;color:#1e2a45;min-heig
 
 .rand-btn{display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:none;background:#4a7aee;color:#fff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s}
 .rand-btn:hover{background:#3a6add}
+.reset-btn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid #d0dcf8;background:#f0f4ff;color:#5570cc;font-size:14px;font-weight:700;cursor:pointer;transition:all .15s}
+.reset-btn:hover{background:#e0eafc;color:#c05050}
 
 /* ── NAV ── */
-.nav-wrap{background:#fff;border-bottom:1px solid #e0e8f8;display:flex;align-items:stretch}
+.nav-wrap{background:#fff;border-bottom:1px solid #e0e8f8;display:flex;align-items:stretch;position:sticky;top:56px;z-index:90}
 .nav-scroll{overflow-x:auto;display:flex;gap:0;scrollbar-width:none;flex:1;cursor:grab;user-select:none}
 .nav-scroll.dragging{cursor:grabbing}
 .nav-scroll::-webkit-scrollbar{display:none}
@@ -142,6 +144,7 @@ body{font-family:'Segoe UI',sans-serif;background:#f5f7fc;color:#1e2a45;min-heig
     <button class="rand-btn" onclick="startRandom()">
       🎲 <span>랜덤 30문제</span>
     </button>
+    <button class="reset-btn" onclick="resetRandom()" title="출제 기록 초기화">↺</button>
   </div>
 </div>
 
@@ -163,7 +166,10 @@ Object.keys(PDF_EMPHASIS_QUESTIONS).forEach(section => {
   ALL_QUESTIONS[section] = PDF_EMPHASIS_QUESTIONS[section];
 });
 
+const USED_RANDOM_STORAGE_KEY = 'fomQuizImportantUsedRandomKeys';
+const USED_CATEGORY_STORAGE_KEY = 'fomQuizCategoryUsedKeys';
 let usedRandomKeys = new Set();
+let usedCategoryKeys = {};
 let currentQs = [];
 let currentFontSize = 16; // 기본 폰트 사이즈 저장 변수
 
@@ -206,8 +212,37 @@ function getRandomTotal() {
 function updateRandomInfo() {
 }
 
+function loadUsedRandomKeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(USED_RANDOM_STORAGE_KEY) || '[]');
+    usedRandomKeys = new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    usedRandomKeys = new Set();
+  }
+}
+
+function saveUsedRandomKeys() {
+  localStorage.setItem(USED_RANDOM_STORAGE_KEY, JSON.stringify([...usedRandomKeys]));
+}
+
+function loadUsedCategoryKeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(USED_CATEGORY_STORAGE_KEY) || '{}');
+    usedCategoryKeys = saved && typeof saved === 'object' ? saved : {};
+  } catch {
+    usedCategoryKeys = {};
+  }
+}
+
+function saveUsedCategoryKeys() {
+  localStorage.setItem(USED_CATEGORY_STORAGE_KEY, JSON.stringify(usedCategoryKeys));
+}
+
 function resetRandom() {
   usedRandomKeys.clear();
+  usedCategoryKeys = {};
+  saveUsedRandomKeys();
+  saveUsedCategoryKeys();
   updateRandomInfo();
   document.querySelectorAll('.sys-btn').forEach(b=>b.classList.remove('active'));
   startRandom();
@@ -220,6 +255,7 @@ function startRandom() {
   for(let i=remaining.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[remaining[i],remaining[j]]=[remaining[j],remaining[i]];}
   const picked = remaining.slice(0,30);
   picked.forEach(item=>usedRandomKeys.add(item.key));
+  saveUsedRandomKeys();
   updateRandomInfo();
   document.querySelectorAll('.sys-btn').forEach(b=>b.classList.remove('active'));
   const qs = picked.map(item=>{
@@ -245,10 +281,23 @@ function buildNav() {
   const nav = document.getElementById('sysNav');
   const pickCategoryQuestions = (sys) => {
     const source = ALL_QUESTIONS[sys];
-    const qs = source.map(q=>({...q,_tag:null,_type:'mcq'}));
-    if (qs.length <= 30) return qs;
-    for(let i=qs.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[qs[i],qs[j]]=[qs[j],qs[i]];}
-    return qs.slice(0,30);
+    if (source.length <= 30) return source.map(q=>({...q,_tag:null,_type:'mcq'}));
+    if (!Array.isArray(usedCategoryKeys[sys])) usedCategoryKeys[sys] = [];
+    let used = new Set(usedCategoryKeys[sys]);
+    let remaining = source
+      .map((q,qi)=>({q,qi,key:`category::${sys}::${qi}`}))
+      .filter(item=>!used.has(item.key));
+    if (remaining.length === 0) {
+      used = new Set();
+      usedCategoryKeys[sys] = [];
+      remaining = source.map((q,qi)=>({q,qi,key:`category::${sys}::${qi}`}));
+    }
+    for(let i=remaining.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[remaining[i],remaining[j]]=[remaining[j],remaining[i]];}
+    const picked = remaining.slice(0,30);
+    picked.forEach(item=>used.add(item.key));
+    usedCategoryKeys[sys] = [...used];
+    saveUsedCategoryKeys();
+    return picked.map(item=>({...item.q,_tag:null,_type:'mcq'}));
   };
   Object.keys(ALL_QUESTIONS).forEach(sys => {
     const count = ALL_QUESTIONS[sys].length;
@@ -491,6 +540,8 @@ function updateProgress(qi, type) {
 }
 
 buildImportantCategory();
+loadUsedRandomKeys();
+loadUsedCategoryKeys();
 updateRandomInfo();
 buildNav();
 enableNavDrag();
